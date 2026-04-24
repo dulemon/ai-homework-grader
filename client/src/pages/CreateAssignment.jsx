@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, useToast } from '../App';
 import Sidebar from '../components/Sidebar';
+import { recognizeImage } from '../utils/ocr';
 
 const SUBJECTS = ['数学', '语文', '英语', '物理', '化学', '生物', '历史', '地理', '政治', '计算机', '其他'];
 
@@ -21,6 +22,9 @@ export default function CreateAssignment() {
     max_score: 100,
   });
   const [questions, setQuestions] = useState([]);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrTarget, setOcrTarget] = useState('description');
+  const [ocrResult, setOcrResult] = useState(null);
 
   const addQuestion = (type) => {
     setQuestions([...questions, type === 'choice' ? emptyChoice() : emptyFillBlank()]);
@@ -48,6 +52,40 @@ export default function CreateAssignment() {
     const updated = [...questions];
     updated[qIndex] = { ...updated[qIndex], correctAnswer: answer };
     setQuestions(updated);
+  };
+
+  const handleOcrUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast('请上传图片文件', 'error');
+      return;
+    }
+
+    setOcrLoading(true);
+    setOcrResult(null);
+
+    try {
+      const data = await recognizeImage(file);
+      const targetLabel = ocrTarget === 'description' ? '题目描述' : '参考答案';
+      const currentText = form[ocrTarget] || '';
+      const mergedText = currentText
+        ? `${currentText.trim()}\n\n${data.recognizedText}`
+        : data.recognizedText;
+
+      setForm((prev) => ({
+        ...prev,
+        [ocrTarget]: mergedText,
+      }));
+      setOcrResult({ ...data, targetLabel });
+      toast(`识别成功，已填入${targetLabel}`, 'success');
+    } catch (err) {
+      toast(err.message || '图片识别失败', 'error');
+    } finally {
+      setOcrLoading(false);
+      e.target.value = '';
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -132,6 +170,68 @@ export default function CreateAssignment() {
                   onChange={(e) => setForm({ ...form, max_score: parseInt(e.target.value) || 100 })}
                 />
               </div>
+            </div>
+
+            <div className="ocr-panel">
+              <div className="ocr-panel-header">
+                <div>
+                  <div className="ocr-panel-title">📷 从图片导入题目</div>
+                  <p className="ocr-panel-desc">上传试卷或题目照片，OCR 识别后自动填入对应字段，适合先导入文字再人工校对。</p>
+                </div>
+              </div>
+
+              <div className="ocr-target-group">
+                <span className="ocr-target-label">导入位置</span>
+                <div className="segmented-control">
+                  <button
+                    type="button"
+                    className={`segmented-item ${ocrTarget === 'description' ? 'active' : ''}`}
+                    onClick={() => setOcrTarget('description')}
+                  >
+                    题目描述
+                  </button>
+                  <button
+                    type="button"
+                    className={`segmented-item ${ocrTarget === 'reference_answer' ? 'active' : ''}`}
+                    onClick={() => setOcrTarget('reference_answer')}
+                  >
+                    参考答案
+                  </button>
+                </div>
+              </div>
+
+              <div className="ocr-upload-box">
+                <div style={{ fontSize: 28 }}>🖼️</div>
+                <div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>识别印刷题面或清晰照片</div>
+                  <div className="ocr-panel-desc">支持 JPG / PNG / WebP / BMP / TIFF，单张最大 10MB。</div>
+                </div>
+                <label className="btn btn-primary btn-sm" style={{ cursor: 'pointer' }}>
+                  {ocrLoading ? '识别中...' : '选择图片'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleOcrUpload}
+                    style={{ display: 'none' }}
+                    disabled={ocrLoading}
+                  />
+                </label>
+              </div>
+
+              {ocrResult && (
+                <div className="ocr-result-card">
+                  <div className="flex justify-between items-center mb-8">
+                    <span style={{ fontWeight: 700, color: '#0d9488' }}>已导入 {ocrResult.targetLabel}</span>
+                    <span className={`badge ${ocrResult.confidence >= 80 ? 'badge-success' : 'badge-warning'}`}>
+                      置信度 {ocrResult.confidence}%
+                    </span>
+                  </div>
+                  <p className="ocr-panel-desc" style={{ marginBottom: 8 }}>
+                    识别到 {ocrResult.wordCount} 个词，建议提交前核对文本与排版。
+                  </p>
+                  <div className="ocr-preview">{ocrResult.recognizedText}</div>
+                </div>
+              )}
             </div>
 
             {/* Objective Questions Section */}

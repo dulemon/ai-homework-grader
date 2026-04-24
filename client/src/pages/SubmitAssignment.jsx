@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth, useToast } from '../App';
 import Sidebar from '../components/Sidebar';
+import { recognizeImage } from '../utils/ocr';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
@@ -19,6 +20,8 @@ export default function SubmitAssignment() {
   const [submitting, setSubmitting] = useState(false);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrResult, setOcrResult] = useState(null);
+  const [ocrTarget, setOcrTarget] = useState('answer');
+  const [recognizedQuestionText, setRecognizedQuestionText] = useState('');
 
   const handleOcrUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -33,22 +36,18 @@ export default function SubmitAssignment() {
     setOcrResult(null);
 
     try {
-      const formData = new FormData();
-      formData.append('image', file);
+      const data = await recognizeImage(file);
+      const importTargetLabel = ocrTarget === 'answer' ? '答案区' : '题目辅助区';
 
-      const res = await fetch('/api/ocr/recognize', {
-        method: 'POST',
-        body: formData,
-      });
+      setOcrResult({ ...data, importTargetLabel });
 
-      const data = await res.json();
+      if (ocrTarget === 'answer') {
+        setContent((prev) => prev ? `${prev}\n${data.recognizedText}` : data.recognizedText);
+      } else {
+        setRecognizedQuestionText((prev) => prev ? `${prev}\n${data.recognizedText}` : data.recognizedText);
+      }
 
-      if (!res.ok) throw new Error(data.error || '识别失败');
-
-      setOcrResult(data);
-      // Append recognized text to content
-      setContent(prev => prev ? prev + '\n' + data.recognizedText : data.recognizedText);
-      toast(data.message, 'success');
+      toast(`${data.message}，已填入${importTargetLabel}`, 'success');
     } catch (err) {
       toast(err.message || '图片识别失败', 'error');
     } finally {
@@ -256,30 +255,47 @@ export default function SubmitAssignment() {
               </h2>
 
               {/* OCR Image Upload */}
-              <div style={{
-                marginBottom: 24,
-                padding: '20px',
-                borderRadius: 'var(--radius-md)',
-                border: '2px dashed var(--border-color)',
-                background: 'var(--bg-input)',
-                textAlign: 'center',
-                transition: 'all 0.2s'
-              }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
-                <p style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>
-                  拍照识别作业
-                </p>
-                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-                  上传手写作业照片，AI 自动识别文字内容
-                </p>
+              <div className="ocr-panel" style={{ marginBottom: 24 }}>
+                <div className="ocr-panel-header">
+                  <div>
+                    <div className="ocr-panel-title">📷 图片识别助手</div>
+                    <p className="ocr-panel-desc">可以上传题目图或手写答案图，识别后的文字可填入答案区，或先放到题目辅助区查看。</p>
+                  </div>
+                </div>
 
-                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                <div className="ocr-target-group">
+                  <span className="ocr-target-label">识别结果写入</span>
+                  <div className="segmented-control">
+                    <button
+                      type="button"
+                      className={`segmented-item ${ocrTarget === 'answer' ? 'active' : ''}`}
+                      onClick={() => setOcrTarget('answer')}
+                    >
+                      答案区
+                    </button>
+                    <button
+                      type="button"
+                      className={`segmented-item ${ocrTarget === 'question' ? 'active' : ''}`}
+                      onClick={() => setOcrTarget('question')}
+                    >
+                      题目辅助区
+                    </button>
+                  </div>
+                </div>
+
+                <div className="ocr-upload-box">
+                  <div style={{ fontSize: 28 }}>🖼️</div>
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>上传题目或答案图片</div>
+                    <div className="ocr-panel-desc">适合识别纸质试题、老师发的题图，或手写作答内容。</div>
+                  </div>
+                <label className="btn btn-primary btn-sm" style={{ cursor: 'pointer' }}>
                   {ocrLoading ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
                       识别中...
                     </span>
-                  ) : '📤 选择图片'}
+                  ) : '选择图片'}
                   <input
                     type="file"
                     accept="image/*"
@@ -288,18 +304,11 @@ export default function SubmitAssignment() {
                     disabled={ocrLoading}
                   />
                 </label>
+              </div>
 
                 {ocrResult && (
-                  <div style={{
-                    marginTop: 16,
-                    padding: '12px 16px',
-                    borderRadius: 'var(--radius-sm)',
-                    background: 'rgba(17, 153, 142, 0.06)',
-                    border: '1px solid rgba(17, 153, 142, 0.2)',
-                    textAlign: 'left',
-                    fontSize: 13
-                  }}>
-                    <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
+                  <div className="ocr-result-card">
+                    <div className="flex justify-between items-center mb-8">
                       <span style={{ fontWeight: 600, color: '#0d9488' }}>
                         ✅ 识别完成
                       </span>
@@ -307,12 +316,27 @@ export default function SubmitAssignment() {
                         置信度 {ocrResult.confidence}%
                       </span>
                     </div>
-                    <p style={{ color: 'var(--text-muted)' }}>
-                      识别到 {ocrResult.wordCount} 个词，内容已填入下方答案区域
+                    <p className="ocr-panel-desc">
+                      识别到 {ocrResult.wordCount} 个词，内容已填入{ocrResult.importTargetLabel}。
                     </p>
                   </div>
                 )}
               </div>
+
+              {recognizedQuestionText && (
+                <div className="form-group">
+                  <label className="form-label">题目辅助区（仅本次作答参考）</label>
+                  <textarea
+                    className="form-textarea helper-textarea"
+                    value={recognizedQuestionText}
+                    onChange={(e) => setRecognizedQuestionText(e.target.value)}
+                    rows={6}
+                  />
+                  <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    这里的内容不会随提交一起发送
+                  </div>
+                </div>
+              )}
 
               <div className="form-group">
                 <label className="form-label">你的答案</label>
