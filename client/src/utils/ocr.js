@@ -1,8 +1,10 @@
+import { apiFetch } from './api';
+
 export async function recognizeImage(file) {
   const formData = new FormData();
   formData.append('image', file);
 
-  const res = await fetch('/api/ocr/recognize', {
+  const res = await apiFetch('/ocr/recognize', {
     method: 'POST',
     body: formData,
   });

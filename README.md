@@ -94,9 +94,9 @@ http://172.20.10.2:5173
 
 - 前端：React + Vite 构建的 H5 页面
 - 后端：Node.js + Express API
-- 访问方式：PC 浏览器和手机浏览器均可访问
+- 访问方式：PC 浏览器、手机浏览器，以及基于 Capacitor 打包的 Android / iOS App
 
-因此它更适合作为毕业设计的“移动端可访问 Web 系统”进行演示；如需后续扩展为 App 或小程序，可继续复用后端接口。
+默认开发方式仍是 H5，但 `client/` 已支持 App 模式打包。需要原生包时，使用 `cd client && npm run build:app && npm run cap:sync`，再打开 Android / iOS 工程继续出包。
 
 ## 🤖 支持的 AI 模型
 

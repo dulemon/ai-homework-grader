@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, useToast } from '../App';
 import Sidebar from '../components/Sidebar';
+import { apiFetch } from '../utils/api';
 
 export default function StudentDashboard() {
   const { user } = useAuth();
@@ -18,8 +19,8 @@ export default function StudentDashboard() {
   const loadData = async () => {
     try {
       const [aRes, sRes] = await Promise.all([
-        fetch('/api/assignments'),
-        fetch(`/api/submissions/student/${user.id}`)
+        apiFetch('/assignments'),
+        apiFetch(`/submissions/student/${user.id}`)
       ]);
       setAssignments(await aRes.json());
       setMySubmissions(await sRes.json());

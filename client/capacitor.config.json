@@ -1,0 +1,10 @@
+{
+  "appId": "com.woqu.aihomeworkgrader",
+  "appName": "AI Homework Grader",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  }
+}

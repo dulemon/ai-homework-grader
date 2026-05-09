@@ -1,5 +1,5 @@
-import { useState, useEffect, createContext, useContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useState, useEffect, useRef, createContext, useContext } from 'react';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import TeacherDashboard from './pages/TeacherDashboard';
 import CreateAssignment from './pages/CreateAssignment';
@@ -7,6 +7,8 @@ import AssignmentDetail from './pages/AssignmentDetail';
 import StudentDashboard from './pages/StudentDashboard';
 import SubmitAssignment from './pages/SubmitAssignment';
 import GradingResult from './pages/GradingResult';
+import { isNativeApp } from './utils/platform';
+import { clearStoredAuth, getStoredAuth, persistAuth } from './utils/storage';
 
 // Auth Context
 export const AuthContext = createContext(null);
@@ -20,6 +22,12 @@ export const ToastContext = createContext(null);
 
 export function useToast() {
   return useContext(ToastContext);
+}
+
+export const ConfirmContext = createContext(null);
+
+export function useConfirm() {
+  return useContext(ConfirmContext);
 }
 
 function Toast({ toast, onClose }) {
@@ -40,38 +48,110 @@ function Toast({ toast, onClose }) {
   );
 }
 
+function ConfirmDialog({ dialog, onCancel, onConfirm }) {
+  if (!dialog) return null;
+
+  return (
+    <div className="confirm-overlay" onClick={onCancel}>
+      <div
+        className="confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 id="confirm-dialog-title" className="confirm-title">
+          {dialog.title}
+        </h3>
+        <p className="confirm-message">{dialog.message}</p>
+        <div className="confirm-actions">
+          <button className="btn btn-ghost btn-lg" type="button" onClick={onCancel}>
+            {dialog.cancelText}
+          </button>
+          <button
+            className={`btn ${dialog.tone === 'danger' ? 'btn-danger' : 'btn-primary'} btn-lg`}
+            type="button"
+            onClick={onConfirm}
+          >
+            {dialog.confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const confirmResolverRef = useRef(null);
+  const Router = isNativeApp() ? HashRouter : BrowserRouter;
 
   useEffect(() => {
-    // Check for stored auth
-    const stored = localStorage.getItem('hw-auth');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setUser(parsed.user);
-      } catch {
-        localStorage.removeItem('hw-auth');
+    let active = true;
+
+    const restoreAuth = async () => {
+      const stored = await getStoredAuth();
+      if (active && stored?.user) {
+        setUser(stored.user);
       }
+      if (active) {
+        setLoading(false);
+      }
+    };
+
+    void restoreAuth();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => () => {
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(false);
+      confirmResolverRef.current = null;
     }
-    setLoading(false);
   }, []);
 
   const login = (userData, token) => {
     setUser(userData);
-    localStorage.setItem('hw-auth', JSON.stringify({ user: userData, token }));
+    void persistAuth(userData, token);
   };
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('hw-auth');
+    void clearStoredAuth();
   };
 
   const showToast = (message, type = 'info') => {
     setToast({ message, type });
   };
+
+  const closeConfirmDialog = (result) => {
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(result);
+      confirmResolverRef.current = null;
+    }
+    setConfirmDialog(null);
+  };
+
+  const showConfirm = (options = {}) => new Promise((resolve) => {
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(false);
+    }
+
+    confirmResolverRef.current = resolve;
+    setConfirmDialog({
+      title: options.title || '请确认操作',
+      message: options.message || '确定继续吗？',
+      confirmText: options.confirmText || '确定',
+      cancelText: options.cancelText || '取消',
+      tone: options.tone || 'primary',
+    });
+  });
 
   if (loading) {
     return (
@@ -84,19 +164,26 @@ function App() {
   return (
     <AuthContext.Provider value={{ user, login, logout }}>
       <ToastContext.Provider value={showToast}>
-        <BrowserRouter>
-          <Toast toast={toast} onClose={() => setToast(null)} />
-          <Routes>
-            <Route path="/login" element={user ? <Navigate to={user.role === 'teacher' ? '/teacher' : '/student'} /> : <Login />} />
-            <Route path="/teacher" element={user?.role === 'teacher' ? <TeacherDashboard /> : <Navigate to="/login" />} />
-            <Route path="/teacher/assignment/new" element={user?.role === 'teacher' ? <CreateAssignment /> : <Navigate to="/login" />} />
-            <Route path="/teacher/assignment/:id" element={user?.role === 'teacher' ? <AssignmentDetail /> : <Navigate to="/login" />} />
-            <Route path="/student" element={user?.role === 'student' ? <StudentDashboard /> : <Navigate to="/login" />} />
-            <Route path="/student/assignment/:id" element={user?.role === 'student' ? <SubmitAssignment /> : <Navigate to="/login" />} />
-            <Route path="/grading/:id" element={user ? <GradingResult /> : <Navigate to="/login" />} />
-            <Route path="*" element={<Navigate to={user ? (user.role === 'teacher' ? '/teacher' : '/student') : '/login'} />} />
-          </Routes>
-        </BrowserRouter>
+        <ConfirmContext.Provider value={showConfirm}>
+          <Router>
+            <Toast toast={toast} onClose={() => setToast(null)} />
+            <ConfirmDialog
+              dialog={confirmDialog}
+              onCancel={() => closeConfirmDialog(false)}
+              onConfirm={() => closeConfirmDialog(true)}
+            />
+            <Routes>
+              <Route path="/login" element={user ? <Navigate to={user.role === 'teacher' ? '/teacher' : '/student'} /> : <Login />} />
+              <Route path="/teacher" element={user?.role === 'teacher' ? <TeacherDashboard /> : <Navigate to="/login" />} />
+              <Route path="/teacher/assignment/new" element={user?.role === 'teacher' ? <CreateAssignment /> : <Navigate to="/login" />} />
+              <Route path="/teacher/assignment/:id" element={user?.role === 'teacher' ? <AssignmentDetail /> : <Navigate to="/login" />} />
+              <Route path="/student" element={user?.role === 'student' ? <StudentDashboard /> : <Navigate to="/login" />} />
+              <Route path="/student/assignment/:id" element={user?.role === 'student' ? <SubmitAssignment /> : <Navigate to="/login" />} />
+              <Route path="/grading/:id" element={user ? <GradingResult /> : <Navigate to="/login" />} />
+              <Route path="*" element={<Navigate to={user ? (user.role === 'teacher' ? '/teacher' : '/student') : '/login'} />} />
+            </Routes>
+          </Router>
+        </ConfirmContext.Provider>
       </ToastContext.Provider>
     </AuthContext.Provider>
   );

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useToast } from '../App';
 import Sidebar from '../components/Sidebar';
 import ScoreRing from '../components/ScoreRing';
+import { apiFetch } from '../utils/api';
 
 export default function AssignmentDetail() {
   const { id } = useParams();
@@ -21,9 +22,9 @@ export default function AssignmentDetail() {
   const loadData = async () => {
     try {
       const [aRes, sRes, stRes] = await Promise.all([
-        fetch(`/api/assignments/${id}`),
-        fetch(`/api/submissions/assignment/${id}`),
-        fetch(`/api/stats/assignment/${id}`)
+        apiFetch(`/assignments/${id}`),
+        apiFetch(`/submissions/assignment/${id}`),
+        apiFetch(`/stats/assignment/${id}`)
       ]);
       setAssignment(await aRes.json());
       setSubmissions(await sRes.json());
@@ -38,7 +39,7 @@ export default function AssignmentDetail() {
   const handleGrade = async (submissionId) => {
     setGradingId(submissionId);
     try {
-      const res = await fetch(`/api/submissions/${submissionId}/grade`, { method: 'POST' });
+      const res = await apiFetch(`/submissions/${submissionId}/grade`, { method: 'POST' });
       if (!res.ok) throw new Error('批改失败');
       toast('AI 批改完成！', 'success');
       loadData();
@@ -59,7 +60,7 @@ export default function AssignmentDetail() {
     for (const sub of ungraded) {
       setGradingId(sub.id);
       try {
-        await fetch(`/api/submissions/${sub.id}/grade`, { method: 'POST' });
+        await apiFetch(`/submissions/${sub.id}/grade`, { method: 'POST' });
       } catch {
         // continue with others
       }

@@ -4,6 +4,45 @@ import { gradeSubmission } from '../services/aiGrader.js';
 
 const router = Router();
 
+function parseJson(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeGradingPayload(record) {
+  const strengths = parseJson(record.strengths, []);
+  const weaknesses = parseJson(record.weaknesses, []);
+  const rawSuggestions = parseJson(record.suggestions, []);
+  const dimensions = parseJson(record.dimensions, []);
+  const highlights = parseJson(record.highlights, []);
+  const summary = record.summary || record.feedback || '';
+
+  const normalizedHighlights = highlights.length > 0
+    ? highlights
+    : strengths.map((comment) => ({ quote: '', comment }));
+
+  const normalizedSuggestions = rawSuggestions.length > 0 && typeof rawSuggestions[0] === 'object'
+    ? rawSuggestions
+    : rawSuggestions.map((example, index) => ({
+        issue: weaknesses[index] || '该部分仍有提升空间',
+        example,
+      }));
+
+  return {
+    ...record,
+    strengths,
+    weaknesses,
+    suggestions: normalizedSuggestions,
+    dimensions,
+    highlights: normalizedHighlights,
+    summary,
+  };
+}
+
 // Submit homework
 router.post('/', (req, res) => {
   try {
@@ -47,7 +86,8 @@ router.get('/assignment/:id', (req, res) => {
   try {
     const submissions = db.prepare(`
       SELECT s.*, u.name as student_name,
-        g.score, g.feedback, g.strengths, g.weaknesses, g.suggestions, g.graded_at
+        g.score, g.feedback, g.strengths, g.weaknesses, g.suggestions,
+        g.dimensions, g.highlights, g.summary, g.graded_at
       FROM submissions s
       JOIN users u ON u.id = s.student_id
       LEFT JOIN gradings g ON g.submission_id = s.id
@@ -55,12 +95,7 @@ router.get('/assignment/:id', (req, res) => {
       ORDER BY s.submitted_at DESC
     `).all(req.params.id);
 
-    const parsed = submissions.map(s => ({
-      ...s,
-      strengths: s.strengths ? JSON.parse(s.strengths) : [],
-      weaknesses: s.weaknesses ? JSON.parse(s.weaknesses) : [],
-      suggestions: s.suggestions ? JSON.parse(s.suggestions) : []
-    }));
+    const parsed = submissions.map(normalizeGradingPayload);
 
     res.json(parsed);
   } catch (error) {
@@ -74,7 +109,7 @@ router.get('/student/:id', (req, res) => {
   try {
     const submissions = db.prepare(`
       SELECT s.*, a.title as assignment_title, a.subject,
-        g.score, g.feedback, g.graded_at
+        g.feedback, g.score, g.summary, g.graded_at
       FROM submissions s
       JOIN assignments a ON a.id = s.assignment_id
       LEFT JOIN gradings g ON g.submission_id = s.id
@@ -96,7 +131,9 @@ router.get('/:id', (req, res) => {
       SELECT s.*, u.name as student_name,
         a.title as assignment_title, a.subject, a.description as assignment_description,
         a.reference_answer, a.questions_json,
-        g.score, g.feedback, g.strengths, g.weaknesses, g.suggestions, g.graded_at
+        a.max_score,
+        g.score, g.feedback, g.strengths, g.weaknesses, g.suggestions,
+        g.dimensions, g.highlights, g.summary, g.graded_at
       FROM submissions s
       JOIN users u ON u.id = s.student_id
       JOIN assignments a ON a.id = s.assignment_id
@@ -108,14 +145,11 @@ router.get('/:id', (req, res) => {
       return res.status(404).json({ error: '提交记录不存在' });
     }
 
-    res.json({
+    res.json(normalizeGradingPayload({
       ...submission,
-      questions_json: submission.questions_json ? JSON.parse(submission.questions_json) : [],
-      objective_answers: submission.objective_answers ? JSON.parse(submission.objective_answers) : {},
-      strengths: submission.strengths ? JSON.parse(submission.strengths) : [],
-      weaknesses: submission.weaknesses ? JSON.parse(submission.weaknesses) : [],
-      suggestions: submission.suggestions ? JSON.parse(submission.suggestions) : []
-    });
+      questions_json: parseJson(submission.questions_json, []),
+      objective_answers: parseJson(submission.objective_answers, {}),
+    }));
   } catch (error) {
     console.error('Get submission error:', error);
     res.status(500).json({ error: '获取提交详情失败' });
@@ -155,9 +189,20 @@ function gradeObjectiveQuestions(questions, studentAnswers) {
     total,
     details,
     feedback: `客观题部分：共 ${total} 题，答对 ${correct} 题，得分 ${score} 分。`,
+    dimensions: [],
+    highlights: correct > 0 ? [{
+      quote: `答对 ${correct} / ${total} 道客观题`,
+      comment: '基础知识点掌握较稳定，客观题得分表现清晰。',
+    }] : [],
+    summary: `你在客观题部分答对了 ${correct} 道题，共 ${total} 道。继续保持审题习惯，把易错点再巩固一下，整体得分会更稳。`,
     strengths: correct > 0 ? [`正确回答了 ${correct} 道客观题`] : [],
     weaknesses: (total - correct) > 0 ? [`${total - correct} 道客观题回答错误，需要复习相关知识点`] : [],
-    suggestions: (total - correct) > 0 ? ['仔细审题，注意关键词', '回顾错题对应的知识点'] : ['继续保持，客观题掌握良好']
+    suggestions: (total - correct) > 0 ? [
+      { issue: `${total - correct} 道客观题回答错误，需要复习相关知识点。`, example: '建议回顾错题对应知识点，并重新完成同类题训练。' },
+      { issue: '审题和关键词识别还可以更仔细。', example: '作答前先圈出条件、单位和限定词，再选择答案。' },
+    ] : [
+      { issue: '当前客观题表现较稳定。', example: '继续保持正确率，同时关注答题速度和稳定性。' },
+    ],
   };
 }
 
@@ -186,6 +231,9 @@ router.post('/:id/grade', async (req, res) => {
     let finalStrengths = [];
     let finalWeaknesses = [];
     let finalSuggestions = [];
+    let finalDimensions = [];
+    let finalHighlights = [];
+    let finalSummary = '';
 
     // Grade objective questions (template matching)
     if (hasObjective) {
@@ -198,6 +246,9 @@ router.post('/:id/grade', async (req, res) => {
           finalStrengths = objResult.strengths;
           finalWeaknesses = objResult.weaknesses;
           finalSuggestions = objResult.suggestions;
+          finalDimensions = objResult.dimensions;
+          finalHighlights = objResult.highlights;
+          finalSummary = objResult.summary;
         } else {
           // Mix: weight 40% objective, 60% subjective
           const aiResult = await gradeSubmission({
@@ -205,14 +256,21 @@ router.post('/:id/grade', async (req, res) => {
             subject: submission.subject,
             description: submission.assignment_description,
             referenceAnswer: submission.reference_answer,
-            studentAnswer: submission.content
+            studentAnswer: submission.content,
+            maxScore: submission.max_score || 100,
           });
 
           finalScore = Math.round(objResult.score * 0.4 + aiResult.score * 0.6);
-          finalFeedback = `${objResult.feedback} ${aiResult.feedback}`;
+          finalFeedback = `${objResult.feedback} ${aiResult.summary}`;
           finalStrengths = [...objResult.strengths, ...aiResult.strengths];
           finalWeaknesses = [...objResult.weaknesses, ...aiResult.weaknesses];
           finalSuggestions = [...objResult.suggestions, ...aiResult.suggestions];
+          finalDimensions = aiResult.dimensions;
+          finalHighlights = [
+            ...objResult.highlights,
+            ...aiResult.highlights,
+          ].slice(0, 4);
+          finalSummary = `${objResult.feedback} ${aiResult.summary}`.trim();
         }
       }
     } else if (hasSubjective) {
@@ -222,35 +280,47 @@ router.post('/:id/grade', async (req, res) => {
         subject: submission.subject,
         description: submission.assignment_description,
         referenceAnswer: submission.reference_answer,
-        studentAnswer: submission.content
+        studentAnswer: submission.content,
+        maxScore: submission.max_score || 100,
       });
 
       finalScore = aiResult.score;
-      finalFeedback = aiResult.feedback;
+      finalFeedback = aiResult.summary;
       finalStrengths = aiResult.strengths;
       finalWeaknesses = aiResult.weaknesses;
       finalSuggestions = aiResult.suggestions;
+      finalDimensions = aiResult.dimensions;
+      finalHighlights = aiResult.highlights;
+      finalSummary = aiResult.summary;
     }
+
+    finalSummary ||= finalFeedback;
 
     // Remove old grading if exists
     db.prepare('DELETE FROM gradings WHERE submission_id = ?').run(submission.id);
 
     // Save grading result
     db.prepare(
-      'INSERT INTO gradings (submission_id, score, feedback, strengths, weaknesses, suggestions) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gradings (submission_id, score, feedback, strengths, weaknesses, suggestions, dimensions, highlights, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(
       submission.id,
       finalScore,
       finalFeedback,
       JSON.stringify(finalStrengths),
       JSON.stringify(finalWeaknesses),
-      JSON.stringify(finalSuggestions)
+      JSON.stringify(finalSuggestions),
+      JSON.stringify(finalDimensions),
+      JSON.stringify(finalHighlights),
+      finalSummary
     );
 
     res.json({
       submission_id: submission.id,
       score: finalScore,
       feedback: finalFeedback,
+      dimensions: finalDimensions,
+      highlights: finalHighlights,
+      summary: finalSummary,
       strengths: finalStrengths,
       weaknesses: finalWeaknesses,
       suggestions: finalSuggestions

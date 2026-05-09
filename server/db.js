@@ -56,9 +56,23 @@ db.exec(`
     strengths TEXT,
     weaknesses TEXT,
     suggestions TEXT,
+    dimensions TEXT DEFAULT '[]',
+    highlights TEXT DEFAULT '[]',
+    summary TEXT DEFAULT '',
     graded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (submission_id) REFERENCES submissions(id)
   );
 `);
+
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+ensureColumn('gradings', 'dimensions', "TEXT DEFAULT '[]'");
+ensureColumn('gradings', 'highlights', "TEXT DEFAULT '[]'");
+ensureColumn('gradings', 'summary', "TEXT DEFAULT ''");
 
 export default db;

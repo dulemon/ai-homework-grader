@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth, useToast } from '../App';
+import { useAuth, useConfirm, useToast } from '../App';
 import Sidebar from '../components/Sidebar';
+import { apiFetch } from '../utils/api';
 
 export default function TeacherDashboard() {
   const { user } = useAuth();
   const toast = useToast();
+  const confirmAction = useConfirm();
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState([]);
   const [stats, setStats] = useState(null);
@@ -18,8 +20,8 @@ export default function TeacherDashboard() {
   const loadData = async () => {
     try {
       const [assignRes, statsRes] = await Promise.all([
-        fetch('/api/assignments'),
-        fetch('/api/stats/overview')
+        apiFetch('/assignments'),
+        apiFetch('/stats/overview')
       ]);
       const assignData = await assignRes.json();
       const statsData = await statsRes.json();
@@ -34,12 +36,23 @@ export default function TeacherDashboard() {
 
   const handleDelete = async (id, e) => {
     e.stopPropagation();
-    if (!confirm('确定要删除这个作业吗？')) return;
+    const confirmed = await confirmAction({
+      title: '删除作业',
+      message: '删除后该作业及相关提交记录将无法恢复，确定继续吗？',
+      confirmText: '删除',
+      cancelText: '取消',
+      tone: 'danger',
+    });
+
+    if (!confirmed) return;
 
     try {
-      await fetch(`/api/assignments/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/assignments/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error();
+      }
       toast('删除成功', 'success');
-      loadData();
+      void loadData();
     } catch {
       toast('删除失败', 'error');
     }

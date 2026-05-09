@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth, useToast } from '../App';
 import Sidebar from '../components/Sidebar';
 import { recognizeImage } from '../utils/ocr';
+import { apiFetch } from '../utils/api';
+import { pickImageFile } from '../utils/media';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
@@ -23,14 +25,16 @@ export default function SubmitAssignment() {
   const [ocrTarget, setOcrTarget] = useState('answer');
   const [recognizedQuestionText, setRecognizedQuestionText] = useState('');
 
-  const handleOcrUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      toast('请上传图片文件', 'error');
+  const handleOcrUpload = async () => {
+    let file;
+    try {
+      file = await pickImageFile();
+    } catch (err) {
+      toast(err.message || '图片选择失败', 'error');
       return;
     }
+
+    if (!file) return;
 
     setOcrLoading(true);
     setOcrResult(null);
@@ -52,7 +56,6 @@ export default function SubmitAssignment() {
       toast(err.message || '图片识别失败', 'error');
     } finally {
       setOcrLoading(false);
-      e.target.value = ''; // Reset file input
     }
   };
 
@@ -62,7 +65,7 @@ export default function SubmitAssignment() {
 
   const loadData = async () => {
     try {
-      const aRes = await fetch(`/api/assignments/${id}`);
+      const aRes = await apiFetch(`/assignments/${id}`);
       const aData = await aRes.json();
       setAssignment(aData);
 
@@ -74,7 +77,7 @@ export default function SubmitAssignment() {
       setQuestions(parsedQuestions);
 
       // Check for existing submission
-      const sRes = await fetch(`/api/submissions/student/${user.id}`);
+      const sRes = await apiFetch(`/submissions/student/${user.id}`);
       const sData = await sRes.json();
       const existing = sData.find(s => s.assignment_id === parseInt(id));
       if (existing) {
@@ -105,9 +108,8 @@ export default function SubmitAssignment() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/submissions', {
+      const res = await apiFetch('/submissions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           assignment_id: parseInt(id),
           student_id: user.id,
@@ -289,21 +291,19 @@ export default function SubmitAssignment() {
                     <div style={{ fontWeight: 700, marginBottom: 4 }}>上传题目或答案图片</div>
                     <div className="ocr-panel-desc">适合识别纸质试题、老师发的题图，或手写作答内容。</div>
                   </div>
-                <label className="btn btn-primary btn-sm" style={{ cursor: 'pointer' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  type="button"
+                  onClick={() => void handleOcrUpload()}
+                  disabled={ocrLoading}
+                >
                   {ocrLoading ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
                       识别中...
                     </span>
-                  ) : '选择图片'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleOcrUpload}
-                    style={{ display: 'none' }}
-                    disabled={ocrLoading}
-                  />
-                </label>
+                  ) : '拍照或选择图片'}
+                </button>
               </div>
 
                 {ocrResult && (

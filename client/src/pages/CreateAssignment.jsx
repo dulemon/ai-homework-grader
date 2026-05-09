@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth, useToast } from '../App';
 import Sidebar from '../components/Sidebar';
 import { recognizeImage } from '../utils/ocr';
+import { apiFetch } from '../utils/api';
+import { pickImageFile } from '../utils/media';
 
 const SUBJECTS = ['数学', '语文', '英语', '物理', '化学', '生物', '历史', '地理', '政治', '计算机', '其他'];
 
@@ -54,14 +56,16 @@ export default function CreateAssignment() {
     setQuestions(updated);
   };
 
-  const handleOcrUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      toast('请上传图片文件', 'error');
+  const handleOcrUpload = async () => {
+    let file;
+    try {
+      file = await pickImageFile();
+    } catch (err) {
+      toast(err.message || '图片选择失败', 'error');
       return;
     }
+
+    if (!file) return;
 
     setOcrLoading(true);
     setOcrResult(null);
@@ -84,7 +88,6 @@ export default function CreateAssignment() {
       toast(err.message || '图片识别失败', 'error');
     } finally {
       setOcrLoading(false);
-      e.target.value = '';
     }
   };
 
@@ -93,9 +96,8 @@ export default function CreateAssignment() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/assignments', {
+      const res = await apiFetch('/assignments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...form,
           questions_json: JSON.stringify(questions),
@@ -206,16 +208,14 @@ export default function CreateAssignment() {
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>识别印刷题面或清晰照片</div>
                   <div className="ocr-panel-desc">支持 JPG / PNG / WebP / BMP / TIFF，单张最大 10MB。</div>
                 </div>
-                <label className="btn btn-primary btn-sm" style={{ cursor: 'pointer' }}>
-                  {ocrLoading ? '识别中...' : '选择图片'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleOcrUpload}
-                    style={{ display: 'none' }}
-                    disabled={ocrLoading}
-                  />
-                </label>
+                <button
+                  className="btn btn-primary btn-sm"
+                  type="button"
+                  onClick={() => void handleOcrUpload()}
+                  disabled={ocrLoading}
+                >
+                  {ocrLoading ? '识别中...' : '拍照或选择图片'}
+                </button>
               </div>
 
               {ocrResult && (

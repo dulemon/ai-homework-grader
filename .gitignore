@@ -3,6 +3,7 @@ node_modules/
 
 # Environment variables (contains API keys!)
 .env
+client/.env.mobile
 
 # Database
 *.db

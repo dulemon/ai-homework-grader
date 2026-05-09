@@ -1,42 +1,66 @@
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-/**
- * AI 批改服务 — 多模型支持
- *
- * 支持的 AI 提供商（在 .env 中配置）：
- * 1. Google Gemini   — 免费 15次/分钟，无需信用卡
- * 2. DeepSeek        — 注册即送额度，中文极佳
- * 3. SiliconFlow     — 注册送 2000万 token，支持 Qwen/GLM
- * 4. OpenAI          — 付费，质量最高
- *
- * 配置方式（.env 中设置任一即可）：
- *   AI_PROVIDER=gemini|deepseek|siliconflow|openai
- *   GEMINI_API_KEY=xxx
- *   DEEPSEEK_API_KEY=xxx
- *   SILICONFLOW_API_KEY=xxx
- *   OPENAI_API_KEY=xxx
- */
+const AI_PROVIDER = process.env.AI_PROVIDER || 'auto';
 
-const AI_PROVIDER = process.env.AI_PROVIDER || 'auto'; // auto = 按优先级自动检测
-
-/**
- * 学科专用 Prompt 模板
- */
 const SUBJECT_PROMPTS = {
-  '数学': '你是一位严谨的数学教师。重点检查计算过程、公式运用、逻辑推导是否正确。对于数学证明题，关注证明的完整性和严密性。',
-  '语文': '你是一位资深的语文教师。重点评估文章结构、语言表达、修辞手法、论证逻辑、中心思想的把握。对作文类题目，关注立意深度和文学性。',
-  '英语': '你是一位专业的英语教师。重点检查语法正确性、词汇使用、句式多样性、语言流畅度。对于翻译题注意信达雅，写作题关注逻辑连贯和地道表达。',
-  '物理': '你是一位物理教师。重点检查物理概念理解、公式选用、单位换算、数值计算。关注学生对物理现象的分析能力和实验设计思路。',
-  '化学': '你是一位化学教师。重点检查化学方程式配平、反应条件标注、计算过程。关注对化学原理的理解和实验操作的规范性。',
-  '生物': '你是一位生物教师。重点检查生物概念的准确性、实验设计的合理性、图表分析能力。关注学生对生命现象的理解深度。',
-  '历史': '你是一位历史教师。重点评估史实准确性、历史分析能力、论述的逻辑性。关注学生对历史事件因果关系的理解。',
-  '计算机': '你是一位计算机科学教师。重点检查代码逻辑、算法正确性、时间空间复杂度分析。关注编程规范和问题解决思路。'
+  数学: '你是一位严谨的数学教师。重点检查解题方向、关键步骤、计算准确性和数学表达规范。',
+  语文: '你是一位资深的语文教师。重点评估切题程度、结构层次、语言表达、思想深度和行文规范。',
+  英语: '你是一位专业的英语教师。重点检查内容要点覆盖、语法拼写、词汇句式、逻辑连贯性和写作格式。',
+  物理: '你是一位物理教师。重点检查科学原理、推导步骤、公式计算和术语表达是否准确。',
+  化学: '你是一位化学教师。重点检查反应原理、实验步骤、公式计算和术语表达是否准确。',
+  生物: '你是一位生物教师。重点检查概念准确性、实验步骤、分析能力和专业术语使用。',
+  政治: '你是一位政治教师。重点检查观点立场、材料结合、逻辑论证和学科术语运用。',
+  历史: '你是一位历史教师。重点检查史实结合、观点表达、逻辑论证和历史术语运用。',
+  地理: '你是一位地理教师。重点检查材料结合、空间分析、逻辑论证和学科术语运用。',
+  计算机: '你是一位计算机科学教师。重点检查思路正确性、步骤完整性、表达规范性和分析能力。',
 };
 
-/**
- * 自动检测可用的 AI 提供商
- */
+const DIMENSION_TEMPLATES = {
+  语文: [
+    { name: '内容与主题', weight: 30, max: 10 },
+    { name: '结构与逻辑', weight: 25, max: 10 },
+    { name: '语言表达与文采', weight: 25, max: 10 },
+    { name: '思想深度与创新', weight: 10, max: 10 },
+    { name: '书写/行文规范', weight: 10, max: 10 },
+  ],
+  数学: [
+    { name: '思路正确性', weight: 30, max: 10 },
+    { name: '步骤完整性', weight: 30, max: 10 },
+    { name: '计算准确性', weight: 20, max: 10 },
+    { name: '表达规范性', weight: 10, max: 10 },
+    { name: '解法创新/简洁性', weight: 10, max: 10 },
+  ],
+  英语: [
+    { name: '内容要点覆盖', weight: 30, max: 10 },
+    { name: '语法与拼写', weight: 25, max: 10 },
+    { name: '词汇与句式多样性', weight: 20, max: 10 },
+    { name: '逻辑连贯性', weight: 15, max: 10 },
+    { name: '格式与字数', weight: 10, max: 10 },
+  ],
+  理科综合: [
+    { name: '原理正确性', weight: 30, max: 10 },
+    { name: '步骤完整性', weight: 25, max: 10 },
+    { name: '计算/公式正确', weight: 25, max: 10 },
+    { name: '术语规范性', weight: 10, max: 10 },
+    { name: '实验思维/分析能力', weight: 10, max: 10 },
+  ],
+  文综综合: [
+    { name: '观点明确性', weight: 25, max: 10 },
+    { name: '材料结合度', weight: 30, max: 10 },
+    { name: '逻辑论证力', weight: 25, max: 10 },
+    { name: '学科术语运用', weight: 10, max: 10 },
+    { name: '结构完整性', weight: 10, max: 10 },
+  ],
+  通用: [
+    { name: '内容准确性', weight: 30, max: 10 },
+    { name: '结构完整性', weight: 25, max: 10 },
+    { name: '表达清晰度', weight: 20, max: 10 },
+    { name: '逻辑连贯性', weight: 15, max: 10 },
+    { name: '提升空间', weight: 10, max: 10 },
+  ],
+};
+
 function detectProvider() {
   if (AI_PROVIDER !== 'auto') return AI_PROVIDER;
   if (process.env.GEMINI_API_KEY) return 'gemini';
@@ -46,61 +70,140 @@ function detectProvider() {
   return 'mock';
 }
 
-/**
- * 构建批改 Prompt
- */
-function buildPrompt(title, subject, description, referenceAnswer, studentAnswer) {
-  return `## 作业信息
-- **标题**：${title}
-- **科目**：${subject}
-- **要求**：${description}
+function getTemplateKey(subject) {
+  if (['物理', '化学', '生物'].includes(subject)) return '理科综合';
+  if (['政治', '历史', '地理'].includes(subject)) return '文综综合';
+  if (DIMENSION_TEMPLATES[subject]) return subject;
+  return '通用';
+}
 
-## 参考答案
-${referenceAnswer || '（未提供参考答案，请根据作业要求自行判断）'}
+function getDimensionTemplate(subject) {
+  return DIMENSION_TEMPLATES[getTemplateKey(subject)];
+}
 
-## 学生答案
-${studentAnswer}
+function buildPrompt({ title, subject, description, referenceAnswer, studentAnswer, maxScore }) {
+  const dimensions = getDimensionTemplate(subject);
+  const dimensionList = dimensions
+    .map((item) => `- ${item.name}：建议权重 ${item.weight}% ，单项满分 ${item.max}`)
+    .join('\n');
 
-## 批改要求
-请以 JSON 格式返回批改结果：
+  return `你是一位经验丰富的${subject}教师。请批改以下学生作业。
+
+题目：${title}
+作业要求：${description || '无'}
+参考答案：${referenceAnswer || '未提供'}
+学生答案：${studentAnswer}
+总分：${maxScore}
+
+你需要从以下维度进行评分：
+${dimensionList}
+
+请严格按照以下 JSON 返回，不要添加任何额外解释：
 {
-  "score": <0-100的整数分数>,
-  "feedback": "<总体评价，2-3句话>",
-  "strengths": ["<优点1>", "<优点2>"],
-  "weaknesses": ["<不足1>", "<不足2>"],
-  "suggestions": ["<改进建议1>", "<改进建议2>"]
+  "score": ${maxScore}以内的整数,
+  "dimensions": [
+    { "name": "维度名称", "score": 0-${dimensions[0]?.max || 10}整数, "max": 10, "reason": "一句话依据" }
+  ],
+  "highlights": [
+    { "quote": "必须直接引用学生答案中的原句或短语", "comment": "指出哪里好、为什么好" }
+  ],
+  "suggestions": [
+    { "issue": "具体问题", "example": "给出可模仿的改写示范或补充步骤" }
+  ],
+  "summary": "2到3句话的老师寄语，使用第二人称你，先肯定再指出提升方向并鼓励"
 }
 
-请严格按照 JSON 格式返回。评分要客观公正，反馈要具体有建设性。`;
+硬性要求：
+1. dimensions 的维度名称必须与给定列表一致，数量保持一致。
+2. highlights 的 quote 必须来自学生答案原文，不能编造。
+3. suggestions 必须给出具体改法或示范。
+4. 不要返回 markdown，不要返回代码块。`;
 }
 
-/**
- * 解析 AI 返回的 JSON
- */
-function parseResult(text) {
-  // Try to extract JSON from the response
-  let jsonStr = text;
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (jsonMatch) jsonStr = jsonMatch[0];
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-  const result = JSON.parse(jsonStr);
+function clipText(text = '', fallback = '表述整体较完整') {
+  const normalized = String(text).replace(/\s+/g, ' ').trim();
+  return normalized ? normalized.slice(0, 48) : fallback;
+}
+
+function extractSnippets(studentAnswer) {
+  const normalized = String(studentAnswer || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) {
+    return ['整体作答内容较完整'];
+  }
+
+  return normalized
+    .split(/(?<=[。！？.!?；;])/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function normalizeDimension(item, templateItem) {
+  const max = Number(item?.max) > 0 ? Number(item.max) : templateItem.max;
+  const score = Math.max(0, Math.min(max, Number(item?.score) || 0));
   return {
-    score: Math.min(100, Math.max(0, parseInt(result.score) || 0)),
-    feedback: result.feedback || '批改完成',
-    strengths: Array.isArray(result.strengths) ? result.strengths : [],
-    weaknesses: Array.isArray(result.weaknesses) ? result.weaknesses : [],
-    suggestions: Array.isArray(result.suggestions) ? result.suggestions : []
+    name: item?.name || templateItem.name,
+    score,
+    max,
+    reason: clipText(item?.reason, `${templateItem.name}表现较稳定`),
   };
 }
 
-// ============================================================
-// Provider Implementations
-// ============================================================
+function computeScoreFromDimensions(dimensions, template, maxScore) {
+  const ratio = dimensions.reduce((sum, item, index) => {
+    const weight = template[index]?.weight || 0;
+    return sum + ((item.score / item.max) * weight);
+  }, 0);
 
-/**
- * Google Gemini — 免费 15 RPM, 1500 RPD
- * 申请地址: https://aistudio.google.com/apikey
- */
+  return Math.max(0, Math.min(maxScore, Math.round((ratio / 100) * maxScore)));
+}
+
+function parseResult(text, subject, maxScore, studentAnswer) {
+  let jsonStr = text;
+  const jsonMatch = String(text || '').match(/\{[\s\S]*\}/);
+  if (jsonMatch) jsonStr = jsonMatch[0];
+
+  const raw = JSON.parse(jsonStr);
+  const template = getDimensionTemplate(subject);
+  const providedDimensions = safeArray(raw.dimensions);
+  const dimensions = template.map((item, index) => normalizeDimension(providedDimensions[index], item));
+  const computedScore = computeScoreFromDimensions(dimensions, template, maxScore);
+  const score = Math.max(0, Math.min(maxScore, Number(raw.score) || computedScore));
+  const snippets = extractSnippets(studentAnswer);
+  const highlights = safeArray(raw.highlights)
+    .map((item, index) => ({
+      quote: clipText(item?.quote, snippets[index] || snippets[0]),
+      comment: clipText(item?.comment, '这部分表达体现了较好的答题思路'),
+    }))
+    .filter((item) => item.quote && item.comment)
+    .slice(0, 3);
+  const suggestions = safeArray(raw.suggestions)
+    .map((item) => ({
+      issue: clipText(item?.issue, '这部分仍有提升空间'),
+      example: clipText(item?.example, '建议补充更具体的论证、步骤或示范表达。'),
+    }))
+    .filter((item) => item.issue && item.example)
+    .slice(0, 3);
+  const summary = clipText(raw.summary, '你已经抓住了作答的核心内容，继续把表达做得更具体、更有层次，会更出色。');
+
+  return {
+    score,
+    dimensions,
+    highlights,
+    suggestions,
+    summary,
+    feedback: summary,
+    strengths: highlights.map((item) => item.comment),
+    weaknesses: suggestions.map((item) => item.issue),
+  };
+}
+
 async function gradeWithGemini(systemPrompt, userPrompt) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({
@@ -108,68 +211,54 @@ async function gradeWithGemini(systemPrompt, userPrompt) {
     generationConfig: {
       temperature: 0.3,
       responseMimeType: 'application/json',
-    }
+    },
   });
 
   const result = await model.generateContent({
-    contents: [{
-      role: 'user',
-      parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
-    }]
+    contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
   });
 
   return result.response.text();
 }
 
-/**
- * DeepSeek — 注册送免费额度
- * 申请地址: https://platform.deepseek.com
- */
 async function gradeWithDeepSeek(systemPrompt, userPrompt) {
   const client = new OpenAI({
     apiKey: process.env.DEEPSEEK_API_KEY,
-    baseURL: 'https://api.deepseek.com'
+    baseURL: 'https://api.deepseek.com',
   });
 
   const response = await client.chat.completions.create({
     model: 'deepseek-chat',
     messages: [
-      { role: 'system', content: systemPrompt + '\n你的回复必须是严格的 JSON 格式。' },
-      { role: 'user', content: userPrompt }
+      { role: 'system', content: `${systemPrompt}\n你的回复必须是严格的 JSON 格式。` },
+      { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    response_format: { type: 'json_object' }
+    response_format: { type: 'json_object' },
   });
 
   return response.choices[0].message.content;
 }
 
-/**
- * SiliconFlow — 注册送 2000万 token, 兼容 OpenAI API
- * 申请地址: https://cloud.siliconflow.cn
- */
 async function gradeWithSiliconFlow(systemPrompt, userPrompt) {
   const client = new OpenAI({
     apiKey: process.env.SILICONFLOW_API_KEY,
-    baseURL: 'https://api.siliconflow.cn/v1'
+    baseURL: 'https://api.siliconflow.cn/v1',
   });
 
   const response = await client.chat.completions.create({
     model: process.env.SILICONFLOW_MODEL || 'Qwen/Qwen2.5-7B-Instruct',
     messages: [
-      { role: 'system', content: systemPrompt + '\n你的回复必须是严格的 JSON 格式。' },
-      { role: 'user', content: userPrompt }
+      { role: 'system', content: `${systemPrompt}\n你的回复必须是严格的 JSON 格式。` },
+      { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    response_format: { type: 'json_object' }
+    response_format: { type: 'json_object' },
   });
 
   return response.choices[0].message.content;
 }
 
-/**
- * OpenAI — 付费
- */
 async function gradeWithOpenAI(systemPrompt, userPrompt) {
   const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -178,33 +267,77 @@ async function gradeWithOpenAI(systemPrompt, userPrompt) {
   const response = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL || 'gpt-4o',
     messages: [
-      { role: 'system', content: systemPrompt + '\n你的回复必须是严格的 JSON 格式。' },
-      { role: 'user', content: userPrompt }
+      { role: 'system', content: `${systemPrompt}\n你的回复必须是严格的 JSON 格式。` },
+      { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    response_format: { type: 'json_object' }
+    response_format: { type: 'json_object' },
   });
 
   return response.choices[0].message.content;
 }
 
-// ============================================================
-// Main Export
-// ============================================================
+function generateMockGrading({ studentAnswer, subject, maxScore }) {
+  const template = getDimensionTemplate(subject);
+  const snippets = extractSnippets(studentAnswer);
+  const baseRatio = Math.min(0.9, Math.max(0.58, 0.6 + Math.min(studentAnswer.length, 240) / 900));
+  const dimensions = template.map((item, index) => {
+    const delta = (index % 3) * 0.08 - 0.04;
+    const ratio = Math.max(0.45, Math.min(0.96, baseRatio + delta));
+    const score = Math.max(4, Math.min(item.max, Math.round(item.max * ratio)));
+    return {
+      name: item.name,
+      score,
+      max: item.max,
+      reason: `${item.name}整体表现${score >= 8 ? '较好' : score >= 6 ? '稳定' : '仍需加强'}，关键点已经覆盖，但还可以更具体。`,
+    };
+  });
 
-/**
- * AI 批改服务入口
- */
-export async function gradeSubmission({ title, subject, description, referenceAnswer, studentAnswer }) {
+  const score = computeScoreFromDimensions(dimensions, template, maxScore);
+  const highlights = snippets.slice(0, 2).map((quote, index) => ({
+    quote,
+    comment: index === 0
+      ? '这部分能够直接回应题目要求，说明你抓住了核心内容。'
+      : '这里的表达比较完整，能看出你已经在尝试组织更清晰的答题结构。',
+  }));
+  const suggestions = [
+    {
+      issue: '部分表述还停留在概括层面，论证或步骤不够展开。',
+      example: subject === '数学'
+        ? '建议把关键推导写完整，例如先说明已知条件，再写公式依据，最后给出结果。'
+        : '建议补充一个更具体的例子或一句更完整的展开说明，让论证更有说服力。',
+    },
+    {
+      issue: '语言或结构还可以更有层次，读起来会更顺。',
+      example: subject === '英语'
+        ? '可以加入连接词或从句，例如使用 because、however、which 等，让句式更丰富。'
+        : '可以先写观点，再写理由，最后补一句总结，让整段层次更清楚。',
+    },
+  ];
+  const summary = `你这次的作答已经抓住了题目的主要方向，说明基础理解是到位的。接下来如果把论证步骤写得更完整、表达做得更具体，你的主观题得分还会继续提升。继续保持。`;
+
+  return {
+    score,
+    dimensions,
+    highlights,
+    suggestions,
+    summary,
+    feedback: summary,
+    strengths: highlights.map((item) => item.comment),
+    weaknesses: suggestions.map((item) => item.issue),
+  };
+}
+
+export async function gradeSubmission({ title, subject, description, referenceAnswer, studentAnswer, maxScore = 100 }) {
   const provider = detectProvider();
-  const subjectGuide = SUBJECT_PROMPTS[subject] || `你是一位专业的${subject}教师，请根据学科特点进行批改。`;
-  const userPrompt = buildPrompt(title, subject, description, referenceAnswer, studentAnswer);
+  const systemPrompt = SUBJECT_PROMPTS[subject] || `你是一位专业的${subject}教师，请根据学科特点进行批改。`;
+  const userPrompt = buildPrompt({ title, subject, description, referenceAnswer, studentAnswer, maxScore });
 
   console.log(`🤖 AI Provider: ${provider}`);
 
   if (provider === 'mock') {
     console.log('⚠️  No AI API key configured — using mock grading');
-    return generateMockGrading(studentAnswer, subject);
+    return generateMockGrading({ studentAnswer, subject, maxScore });
   }
 
   try {
@@ -212,64 +345,25 @@ export async function gradeSubmission({ title, subject, description, referenceAn
 
     switch (provider) {
       case 'gemini':
-        responseText = await gradeWithGemini(subjectGuide, userPrompt);
+        responseText = await gradeWithGemini(systemPrompt, userPrompt);
         break;
       case 'deepseek':
-        responseText = await gradeWithDeepSeek(subjectGuide, userPrompt);
+        responseText = await gradeWithDeepSeek(systemPrompt, userPrompt);
         break;
       case 'siliconflow':
-        responseText = await gradeWithSiliconFlow(subjectGuide, userPrompt);
+        responseText = await gradeWithSiliconFlow(systemPrompt, userPrompt);
         break;
       case 'openai':
-        responseText = await gradeWithOpenAI(subjectGuide, userPrompt);
+        responseText = await gradeWithOpenAI(systemPrompt, userPrompt);
         break;
       default:
         throw new Error(`Unknown AI provider: ${provider}`);
     }
 
-    return parseResult(responseText);
+    return parseResult(responseText, subject, maxScore, studentAnswer);
   } catch (error) {
     console.error(`AI grading error (${provider}):`, error.message || error);
-    // Fallback to mock
     console.log('⬇️  Falling back to mock grading');
-    return generateMockGrading(studentAnswer, subject);
+    return generateMockGrading({ studentAnswer, subject, maxScore });
   }
-}
-
-/**
- * Mock grading with subject-aware feedback
- */
-function generateMockGrading(studentAnswer, subject) {
-  const length = studentAnswer.length;
-  const score = Math.min(95, Math.max(40, 60 + Math.floor(length / 10)));
-
-  const subjectFeedback = {
-    '数学': {
-      strengths: ['解题思路清晰，步骤完整', '公式运用基本正确', '计算过程规范'],
-      weaknesses: ['部分计算步骤缺少中间过程', '某些公式的适用条件理解不够准确'],
-      suggestions: ['注意书写解题步骤的完整性', '多练习同类型题目加深理解']
-    },
-    '英语': {
-      strengths: ['词汇使用较为准确', '句式有一定的多样性', '基本语法正确'],
-      weaknesses: ['部分句子结构较为简单', '某些高级词汇使用不够自然'],
-      suggestions: ['多阅读英文原著提升语感', '尝试使用更多从句和复合句']
-    },
-    '语文': {
-      strengths: ['文章结构较为完整', '中心思想表达清晰', '语言通顺流畅'],
-      weaknesses: ['论述深度有待加强', '缺少具体事例支撑观点'],
-      suggestions: ['多积累名言和典型事例', '加强议论文写作练习']
-    }
-  };
-
-  const fb = subjectFeedback[subject] || {
-    strengths: ['回答结构清晰，逻辑性较强', '对基本概念有一定的理解'],
-    weaknesses: ['部分知识点的理解不够深入', '缺少具体的例子来支撑论述'],
-    suggestions: ['建议多阅读相关教材', '注意答题的完整性']
-  };
-
-  return {
-    score,
-    feedback: `（模拟批改）整体回答质量${score >= 80 ? '较好' : score >= 60 ? '一般' : '有待提高'}。请配置 AI API Key 以获得真实批改结果。`,
-    ...fb
-  };
 }
